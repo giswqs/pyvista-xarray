@@ -73,12 +73,12 @@ class BasePyVistaAccessor:
         """Attribute for location based indexing like pandas."""
         return _LocIndexer(self)
 
+    def _get_ordered_dims(self):
+        raise NotImplementedError
+
     def _check_safe_dims(self):
-        # TODO: check ordering as ZXY, not just shape
-        # for dim in self._obj.dims:
-        #     if dim not in [self.x_coord, self.y_coord, self.z_coord]:
-        #         raise ValueError(f'Please select an index along the `{dim}` dimension.')
-        pass
+        if self._obj.dims != self._get_ordered_dims():
+            self._obj = self._obj.transpose(*self._get_ordered_dims(), transpose_coords=True)
 
     @property
     def data(self):
@@ -142,6 +142,7 @@ class BasePyVistaAccessor:
             return self._x
         if self.x_coord is None:
             raise ValueError(f"x coord not set. Please set to one of: {self._obj.coords}")
+        self._check_safe_dims()
         self._x = self._obj[self.x_coord].values
         return self._x
 
@@ -151,6 +152,7 @@ class BasePyVistaAccessor:
             return self._y
         if self.y_coord is None:
             raise ValueError(f"y coord not set. Please set to one of: {self._obj.coords}")
+        self._check_safe_dims()
         self._y = self._obj[self.y_coord].values
         return self._y
 
@@ -159,6 +161,7 @@ class BasePyVistaAccessor:
         if self._z is not None:
             return self._z
         if self.z_coord is not None:
+            self._check_safe_dims()
             self._z = self._obj[self.z_coord].values
         return self._z
 
@@ -190,6 +193,39 @@ class PyVistaRectilinearGridAccessor(BasePyVistaAccessor):
         result.pyvista_rectilinear.update()
         return result
 
+    def _get_ordered_dims(self):
+        dims = list(self._obj.dims)
+
+        def push_subdim(coord):
+            subdims = self._obj[coord].dims
+            for sub in subdims:
+                if dims.pop(dims.index(sub)):
+                    dims.insert(0, sub)
+
+        if self.y_coord is not None:
+            push_subdim(self.y_coord)
+        if self.x_coord is not None:
+            push_subdim(self.x_coord)
+        if self.z_coord is not None:
+            push_subdim(self.z_coord)
+
+        return tuple(dims)
+
+    @property
+    def data(self):
+        data = super().data
+        if self.z is None:
+            if data.ndim > 2:
+                sz = (self.x.size * self.y.size, -1)
+            else:
+                sz = self.x.size * self.y.size
+        else:
+            if data.ndim > 3:
+                sz = (self.x.size * self.y.size * self.z.size, -1)
+            else:
+                sz = self.x.size * self.y.size * self.z.size
+        return data.reshape(sz)
+
     @property
     def mesh(self):
         self._mesh.x = self.x
@@ -197,7 +233,7 @@ class PyVistaRectilinearGridAccessor(BasePyVistaAccessor):
         z = self.z
         if z is not None:
             self._mesh.z = self.z
-        self._mesh[self._obj.name or "data"] = self.data.ravel()
+        self._mesh[self._obj.name or "data"] = self.data
         return self._mesh
 
 
@@ -216,6 +252,10 @@ class PyVistaStructuredGridAccessor(BasePyVistaAccessor):
         result.pyvista_structured.copy_meta(self)
         result.pyvista_structured.update()
         return result
+
+    def _get_ordered_dims(self):
+        # TODO: this is different for multidimensional coordinates
+        return self._obj.dims
 
     @property
     def x(self):
@@ -243,17 +283,27 @@ class PyVistaStructuredGridAccessor(BasePyVistaAccessor):
 
     @property
     def data(self):
-        v = super().data
-        if v.shape != self.x.shape:
+        data = super().data
+        if data.shape != self.x.shape:
             raise ValueError(
                 "Coord and data shape mismatch. You may need to `transpose` the DataArray."
             )
-        return v
+        if self.z is None:
+            if data.ndim > 2:
+                sz = (self.x, -1)
+            else:
+                sz = self.x.size
+        else:
+            if data.ndim > 3:
+                sz = (self.x.size, -1)
+            else:
+                sz = self.x.size
+        return data.reshape(sz, order="F")
 
     @property
     def mesh(self):
         self._mesh.points = self.points
         shape = self.x.shape
         self._mesh.dimensions = list(shape) + [1] * (3 - len(shape))
-        self._mesh[self._obj.name or "data"] = self.data.ravel(order="F")
+        self._mesh[self._obj.name or "data"] = self.data
         return self._mesh

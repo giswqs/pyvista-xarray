@@ -87,6 +87,10 @@ import xarray as xr
 da = rioxarray.open_rasterio("TC_NG_SFBay_US_Geo_COG.tif")
 da = da.rio.reproject("EPSG:3857")
 
+# Grab mesh with all band data
+mesh = da.pyvista_rectilinear.mesh
+mesh.plot(rgb=True)
+
 # Grab a single band
 band = da[dict(band=0)]
 
