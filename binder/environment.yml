@@ -1,0 +1,12 @@
+name: pvxarray
+channels:
+  - conda-forge
+dependencies:
+  - xarray
+  - pyvista
+  - pooch
+  - dask
+  - netcdf4
+  - rioxarray
+  - pip:
+      - pyvista-xarray
